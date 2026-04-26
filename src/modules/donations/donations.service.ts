@@ -28,8 +28,7 @@ export class DonationsService {
       const donation = await tx.donation.create({
         data: {
           amount: dto.amount,
-          assetCode: dto.assetCode,
-          assetIssuer: dto.assetIssuer,
+          assetType: dto.assetType,
           projectId: dto.projectId,
           donorId,
         },

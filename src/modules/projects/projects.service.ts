@@ -9,6 +9,7 @@ import { GetProjectAnalyticsDto, ProjectAnalyticsResponseDto } from './dto';
 import { ProjectStatus, UserRole, AuditActionType } from '../../../generated/prisma';
 import { validateStatusTransition, isProjectAcceptingDonations } from './utils/status-transition.validator';
 import { EmailService } from '../users/email.service';
+import { ProjectDonationsResponseDto } from './dto/project-donations-response.dto';
 import { Decimal } from '@prisma/client/runtime/library';
 
 @Injectable()
@@ -296,6 +297,66 @@ export class ProjectsService {
     }
 
     return project;
+  }
+
+  async getProjectDonations(
+    projectId: string,
+    query: { page: number; limit: number; anonymize: boolean },
+  ): Promise<ProjectDonationsResponseDto> {
+    // Verify project exists
+    await this.findOne(projectId);
+
+    const { page, limit, anonymize } = query;
+    const skip = (page - 1) * limit;
+
+    // Get donations with donor info
+    const donations = await this.prisma.donation.findMany({
+      where: { projectId },
+      include: {
+        donor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            isAnonymous: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    });
+
+    // Get total count
+    const totalCount = await this.prisma.donation.count({
+      where: { projectId },
+    });
+
+    // Calculate total amount
+    const totalAmountResult = await this.prisma.donation.aggregate({
+      where: { projectId },
+      _sum: { amount: true },
+    });
+    const totalAmount = totalAmountResult._sum.amount || 0;
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    return {
+      donations: donations.map((donation) => ({
+        ...donation,
+        anonymize, // Pass anonymize flag to the DTO transform
+      })),
+      statistics: {
+        totalCount,
+        totalAmount: Number(totalAmount),
+      },
+      pagination: {
+        page,
+        limit,
+        totalPages,
+        totalItems: totalCount,
+      },
+    };
   }
 
   private async checkAuthorization(

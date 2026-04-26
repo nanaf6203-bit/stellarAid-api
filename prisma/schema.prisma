@@ -102,6 +102,7 @@ model User {
   kycDocumentUrl   String?
   kycSubmittedAt   DateTime?
   kycVerifiedAt    DateTime?
+  isAnonymous      Boolean       @default(false) // Opt-in anonymity for donations
   deletedAt        DateTime?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -180,6 +181,10 @@ model Donation {
   projectId      String
   project        Project   @relation(fields: [projectId], references: [id])
   donorId        String
+  donor          User      @relation(fields: [donorId], references: [id])
+  amount         Decimal   @db.Decimal(18, 7)
+  assetType      AssetType
+  transactionHash String?   @unique
   donor          User     @relation(fields: [donorId], references: [id])
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

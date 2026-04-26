@@ -1,5 +1,6 @@
-import { IsNotEmpty, IsString, IsDecimal, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsString, IsDecimal, IsEnum } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { AssetType } from '../../../../generated/prisma';
 
 export class CreateDonationDto {
   @IsNotEmpty()
@@ -11,11 +12,7 @@ export class CreateDonationDto {
   @IsDecimal()
   amount: number;
 
-  @IsOptional()
-  @IsString()
-  assetCode?: string;
-
-  @IsOptional()
-  @IsString()
-  assetIssuer?: string;
+  @IsNotEmpty()
+  @IsEnum(AssetType)
+  assetType: AssetType;
 }

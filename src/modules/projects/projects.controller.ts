@@ -6,11 +6,13 @@ import {
   Delete, 
   Param, 
   Body, 
+  Query,
   UseGuards, 
   UseInterceptors, 
   UploadedFile,
   ParseUUIDPipe,
   ForbiddenException,
+  ClassSerializerInterceptor
   Query
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -22,6 +24,8 @@ import { ResumeProjectDto } from './dto/resume-project.dto';
 import { CompleteProjectDto } from './dto/complete-project.dto';
 import { SearchProjectsDto } from './dto/search-projects.dto';
 import { UploadImageDto, ImageUploadResponseDto } from './dto/upload-image.dto';
+import { GetProjectDonationsQueryDto } from './dto/get-project-donations-query.dto';
+import { ProjectDonationsResponseDto } from './dto/project-donations-response.dto';
 import { GetProjectAnalyticsDto, ProjectAnalyticsResponseDto } from './dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -73,6 +77,15 @@ export class ProjectsController {
   @Get(':id/status-history')
   getStatusHistory(@Param('id') id: string) {
     return this.projectsService.getStatusHistory(id);
+  }
+
+  @Get(':id/donations')
+  @UseInterceptors(ClassSerializerInterceptor)
+  getProjectDonations(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: GetProjectDonationsQueryDto,
+  ): Promise<ProjectDonationsResponseDto> {
+    return this.projectsService.getProjectDonations(id, query);
   }
 
   @Patch(':id/pause')

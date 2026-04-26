@@ -13,7 +13,6 @@ import { AdminModule } from './modules/admin/admin.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { DonationsModule } from './modules/donations/donations.module';
 import { JwtAuthGuard, RolesGuard } from './modules/auth';
-import { DonationsModule } from './donations/donations.module';
 
 @Module({
   imports: [
