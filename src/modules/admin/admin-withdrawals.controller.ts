@@ -12,6 +12,7 @@ import { UserRole } from '../auth/types/user-role.enum';
 import { ProcessWithdrawalDto } from './dto/process-withdrawal.dto';
 import { ListWithdrawalsQueryDto } from './dto/list-withdrawals-query.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RejectWithdrawalDto } from './dto/reject-withdrawal.dto';
 
 @Controller('admin/withdrawals')
 @Roles(UserRole.ADMIN)
@@ -40,5 +41,19 @@ export class AdminWithdrawalsController {
     @Body() dto: ProcessWithdrawalDto
   ) {
     return this.adminWithdrawalsService.processWithdrawal(id, user.id, dto);
+  }
+
+  @Patch(':id/approve')
+  approveWithdrawal(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.adminWithdrawalsService.approveWithdrawal(id, user.id);
+  }
+
+  @Patch(':id/reject')
+  rejectWithdrawal(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: RejectWithdrawalDto,
+  ) {
+    return this.adminWithdrawalsService.rejectWithdrawal(id, user.id, dto.rejectionReason);
   }
 }

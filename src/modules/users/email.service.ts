@@ -34,4 +34,37 @@ export class EmailService {
     );
     // TODO: Implement actual email sending with rejection reason and appeal instructions
   }
+
+  async sendWithdrawalRequestSubmittedToAdmin(
+    adminEmail: string,
+    projectTitle: string,
+    amount: string,
+    creatorEmail: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Withdrawal request alert would be sent to admin ${adminEmail}. Project: ${projectTitle}, Amount: ${amount}, Creator: ${creatorEmail}`,
+    );
+  }
+
+  async sendWithdrawalApprovedEmail(
+    creatorEmail: string,
+    projectTitle: string,
+    amount: string,
+    transactionHash?: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Withdrawal approval email would be sent to ${creatorEmail}. Project: ${projectTitle}, Amount: ${amount}, Tx: ${transactionHash || 'pending'}`,
+    );
+  }
+
+  async sendWithdrawalRejectedEmail(
+    creatorEmail: string,
+    projectTitle: string,
+    amount: string,
+    reason: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Withdrawal rejection email would be sent to ${creatorEmail}. Project: ${projectTitle}, Amount: ${amount}, Reason: ${reason}`,
+    );
+  }
 }

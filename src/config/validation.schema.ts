@@ -51,6 +51,12 @@ export const validationSchema = Joi.object({
   STELLAR_HORIZON_URL: Joi.string()
     .optional()
     .description('Stellar Horizon API URL'),
+  STELLAR_PLATFORM_PUBLIC_KEY: Joi.string()
+    .optional()
+    .description('Platform Stellar public key for payouts'),
+  STELLAR_PLATFORM_SECRET: Joi.string()
+    .optional()
+    .description('Platform Stellar secret key for payouts'),
 
   // Logging
   LOG_LEVEL: Joi.string()

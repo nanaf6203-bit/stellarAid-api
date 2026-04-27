@@ -3,10 +3,16 @@ import { PrismaService } from '../../database/prisma.service';
 import { WithdrawalStatus } from '../../../../generated/prisma';
 import { ListWithdrawalsQueryDto } from './dto/list-withdrawals-query.dto';
 import { ProcessWithdrawalDto } from './dto/process-withdrawal.dto';
+import { EmailService } from '../users/email.service';
+import { StellarPayoutService } from '../withdrawals/services/stellar-payout.service';
 
 @Injectable()
 export class AdminWithdrawalsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly stellarPayoutService: StellarPayoutService,
+  ) {}
 
   async listWithdrawals(query: ListWithdrawalsQueryDto) {
     const { search, status, projectId, creatorId, startDate, endDate, page = 1, limit = 20 } = query;
@@ -69,39 +75,101 @@ export class AdminWithdrawalsService {
   }
 
   async processWithdrawal(id: string, adminId: string, dto: ProcessWithdrawalDto) {
-    const withdrawal = await this.prisma.withdrawal.findFirst({ where: { id } });
-    if (!withdrawal) throw new NotFoundException('Withdrawal not found');
-    
-    if (withdrawal.status !== WithdrawalStatus.PENDING) {
-      throw new BadRequestException('Withdrawal can only be processed if it is pending');
+    if (dto.status === WithdrawalStatus.REJECTED) {
+      if (!dto.rejectionReason) {
+        throw new BadRequestException('Rejection reason is required when rejecting a withdrawal');
+      }
+
+      return this.rejectWithdrawal(id, adminId, dto.rejectionReason);
     }
 
-    const updateData: any = {
-      status: dto.status,
+    if (dto.status === WithdrawalStatus.APPROVED || dto.status === WithdrawalStatus.COMPLETED) {
+      return this.approveWithdrawal(id, adminId);
+    }
+
+    throw new BadRequestException('Unsupported withdrawal status transition');
+  }
+
+  async approveWithdrawal(id: string, adminId: string) {
+    const approved = await this.transitionFromPending(id, {
+      status: WithdrawalStatus.APPROVED,
       processedBy: adminId,
       processedAt: new Date(),
-    };
-
-    if (dto.status === WithdrawalStatus.REJECTED && dto.rejectionReason) {
-      updateData.rejectionReason = dto.rejectionReason;
-    }
-
-    if (dto.status === WithdrawalStatus.COMPLETED && dto.transactionHash) {
-      updateData.transactionHash = dto.transactionHash;
-    }
-
-    const updated = await this.prisma.withdrawal.update({
-      where: { id },
-      data: updateData,
-      include: {
-        project: { select: { id: true, title: true } },
-        creator: { select: { id: true, firstName: true, lastName: true, email: true } }
-      }
+      rejectionReason: null,
     });
 
-    return { 
-      message: `Withdrawal ${dto.status.toLowerCase()} successfully`, 
-      withdrawal: updated 
+    try {
+      const payout = await this.stellarPayoutService.sendPayout({
+        amount: String(approved.amount),
+        assetCode: approved.assetCode,
+        assetIssuer: approved.assetIssuer,
+        destinationAddress: approved.walletAddress,
+      });
+
+      const completed = await this.prisma.withdrawal.update({
+        where: { id: approved.id },
+        data: {
+          status: WithdrawalStatus.COMPLETED,
+          transactionHash: payout.transactionHash,
+        },
+        include: {
+          project: { select: { id: true, title: true } },
+          creator: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+      });
+
+      await this.emailService.sendWithdrawalApprovedEmail(
+        completed.creator.email,
+        completed.project.title,
+        String(completed.amount),
+        completed.transactionHash ?? undefined,
+      );
+
+      return {
+        message: 'Withdrawal approved and payout completed successfully',
+        withdrawal: completed,
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown payout error';
+      const failureReason = `Payout failed: ${reason}`;
+
+      await this.prisma.withdrawal.update({
+        where: { id: approved.id },
+        data: {
+          status: WithdrawalStatus.FAILED,
+          rejectionReason: failureReason,
+        },
+      });
+
+      await this.emailService.sendWithdrawalRejectedEmail(
+        approved.creator.email,
+        approved.project.title,
+        String(approved.amount),
+        failureReason,
+      );
+
+      throw new BadRequestException(`Withdrawal approval failed during payout: ${reason}`);
+    }
+  }
+
+  async rejectWithdrawal(id: string, adminId: string, rejectionReason: string) {
+    const rejected = await this.transitionFromPending(id, {
+      status: WithdrawalStatus.REJECTED,
+      processedBy: adminId,
+      processedAt: new Date(),
+      rejectionReason,
+    });
+
+    await this.emailService.sendWithdrawalRejectedEmail(
+      rejected.creator.email,
+      rejected.project.title,
+      String(rejected.amount),
+      rejectionReason,
+    );
+
+    return {
+      message: 'Withdrawal rejected successfully',
+      withdrawal: rejected,
     };
   }
 
@@ -129,5 +197,44 @@ export class AdminWithdrawalsService {
       total,
       totalProcessedAmount: totalAmount._sum.amount || 0,
     };
+  }
+
+  private async transitionFromPending(
+    id: string,
+    data: {
+      status: WithdrawalStatus;
+      processedBy: string;
+      processedAt: Date;
+      rejectionReason?: string | null;
+    },
+  ) {
+    const updated = await this.prisma.withdrawal.updateMany({
+      where: {
+        id,
+        status: WithdrawalStatus.PENDING,
+      },
+      data,
+    });
+
+    if (updated.count === 0) {
+      const existing = await this.prisma.withdrawal.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+
+      if (!existing) {
+        throw new NotFoundException('Withdrawal not found');
+      }
+
+      throw new BadRequestException('Withdrawal can only be processed if it is pending');
+    }
+
+    return this.prisma.withdrawal.findUniqueOrThrow({
+      where: { id },
+      include: {
+        project: { select: { id: true, title: true } },
+        creator: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    });
   }
 }

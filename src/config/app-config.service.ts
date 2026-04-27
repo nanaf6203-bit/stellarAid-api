@@ -72,6 +72,14 @@ export class AppConfigService {
     return this.configService.get<string>('STELLAR_HORIZON_URL');
   }
 
+  get stellarPlatformPublicKey(): string | undefined {
+    return this.configService.get<string>('STELLAR_PLATFORM_PUBLIC_KEY');
+  }
+
+  get stellarPlatformSecret(): string | undefined {
+    return this.configService.get<string>('STELLAR_PLATFORM_SECRET');
+  }
+
   // Logging
   get logLevel(): string {
     return this.configService.get<string>('LOG_LEVEL') || 'info';
