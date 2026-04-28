@@ -113,6 +113,7 @@ model User {
   donations        Donation[]
   withdrawals       Withdrawal[]
   auditLogs        AuditLog[]
+  adminLogs        AdminLog[]
   platformSettings PlatformSettings[]
 
   @@map("users")
@@ -287,6 +288,20 @@ model AuditLog {
   @@index([createdAt])
 }
 
+
+model AdminLog {
+  id        String   @id @default(uuid())
+  adminId   String
+  admin     User     @relation(fields: [adminId], references: [id])
+  action    String   // e.g. APPROVE_PROJECT, REJECT_PROJECT, UPDATE_ROLE
+  target    String?  // target entity id
+  details   String?  // JSON serialized details
+  createdAt DateTime @default(now())
+
+  @@map("admin_logs")
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
 model PlatformSettings {
   id                   String   @id @default(uuid())
   minimumGoal          Decimal  @default(100) @db.Decimal(18, 7)
