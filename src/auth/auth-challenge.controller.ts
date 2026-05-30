@@ -1,12 +1,7 @@
 import { Controller, Get, Query, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { StrKey } from '@stellar/stellar-sdk';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 interface ChallengeResponse {
   challenge: string;
@@ -14,6 +9,7 @@ interface ChallengeResponse {
 
 @ApiTags('auth')
 @Controller('auth')
+@Throttle({ default: { limit: 10, ttl: 60_000 } })
 export class AuthChallengeController {
   @Get('challenge')
   @ApiOperation({ summary: 'Get authentication challenge for wallet address' })
