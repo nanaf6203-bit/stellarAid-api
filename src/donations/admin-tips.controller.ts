@@ -4,6 +4,7 @@ import {
   UseGuards,
   Request,
   ForbiddenException,
+  Param,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
 import { AdminGuard } from '../users/guards/admin.guard';
