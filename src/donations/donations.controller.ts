@@ -6,20 +6,20 @@ import {
   Param,
   UseGuards,
   Request,
-  BadRequestException,
-  NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
+import { AdminGuard } from '../users/guards/admin.guard';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { DonationResponseDto, PlatformTipResponseDto } from './dto/donation.dto';
 import { Request as ExpressRequest } from 'express';
 
 @Controller('donations')
-@UseGuards(JwtAuthGuard)
 export class DonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
+  @UseGuards(JwtAuthGuard)
   @Post()
   async createDonation(
     @Request() req: ExpressRequest & { user: any },
@@ -29,14 +29,14 @@ export class DonationsController {
     return this.donationsService.createDonation(userId, dto);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('me')
-  async getMyDonations(
-    @Request() req: ExpressRequest & { user: any },
-  ) {
+  async getMyDonations(@Request() req: ExpressRequest & { user: any }) {
     const userId = req.user?.sub as string;
     return this.donationsService.findAll(userId);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
   async getDonation(
     @Param('id') id: string,
@@ -54,7 +54,6 @@ export class DonationsController {
 
     if (!verified) {
       const tipVerified = await this.donationsService.verifyTipOnChain(txHash);
-
       return {
         verified: tipVerified,
         status: tipVerified ? 'CONFIRMED' : 'PENDING',
@@ -66,24 +65,4 @@ export class DonationsController {
       status: 'CONFIRMED',
     };
   }
-
-  @Get('admin/tips/revenue')
-  async getTipRevenue(@Request() req: ExpressRequest & { user: any }) {
-    const user = req.user;
-    if (user?.role !== 'ADMIN') {
-      throw new ForbiddenException();
-    }
-    return this.donationsService.getTipRevenue();
-  }
-
-  @Get('admin/tips')
-  async getAllTips(@Request() req: ExpressRequest & { user: any }) {
-    const user = req.user;
-    if (user?.role !== 'ADMIN') {
-      throw new ForbiddenException();
-    }
-    return this.donationsService.getAllTips();
-  }
 }
-
-import { ForbiddenException } from '@nestjs/common';

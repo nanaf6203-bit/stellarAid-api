@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { CreateDonationDto } from './dto/create-donation.dto';
@@ -230,5 +230,73 @@ export class DonationsService {
     }
 
     return donation;
+  }
+
+  async getTipRevenue() {
+    const tips = await this.prisma.platformTip.findMany({
+      where: { status: 'CONFIRMED' },
+      select: {
+        amount: true,
+        assetCode: true,
+        createdAt: true,
+      },
+    });
+
+    const totalRevenue = tips.reduce((sum, tip) => {
+      return sum + parseFloat(tip.amount.toString());
+    }, 0);
+
+    return {
+      totalTips: tips.length,
+      totalRevenue,
+      currency: 'XLM',
+      tipsByAsset: tips.reduce((acc, tip) => {
+        acc[tip.assetCode] = (acc[tip.assetCode] || 0) + parseFloat(tip.amount.toString());
+        return acc;
+      }, {} as Record<string, number>),
+    };
+  }
+
+  async getAllTips() {
+    return this.prisma.platformTip.findMany({
+      include: {
+        donor: {
+          select: {
+            id: true,
+            walletAddress: true,
+            displayName: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getTipById(id: string) {
+    const tip = await this.prisma.platformTip.findUnique({
+      where: { id },
+      include: {
+        donor: {
+          select: {
+            id: true,
+            walletAddress: true,
+            displayName: true,
+          },
+        },
+        donation: {
+          select: {
+            id: true,
+            amount: true,
+            campaignId: true,
+          },
+        },
+      },
+    });
+
+    if (!tip) {
+      throw new NotFoundException('Tip not found');
+    }
+
+    return tip;
   }
 }
