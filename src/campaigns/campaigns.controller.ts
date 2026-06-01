@@ -1,39 +1,54 @@
 import {
+  BadRequestException,
   Controller,
   Get,
-  Query,
-  UseInterceptors,
   Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import Keyv from 'keyv';
 import { CampaignsService } from './campaigns.service';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
-import { Body, Post } from '@nestjs/common';
+import { Body } from '@nestjs/common';
+import { Request } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../users/guards/admin.guard';
 
 const FORBIDDEN_FIELDS = [
   'goalAmount',
   'contractId',
+  'acceptedAssets',
   'milestones',
   'endDate',
 ];
 import { BrowseCampaignsQueryDto, BrowseCampaignsResponseDto } from './dto/browse-campaigns.dto';
 
+const CACHE_MANAGER = 'CACHE_MANAGER';
+
 @Controller('campaigns')
 export class CampaignsController {
-  constructor(private readonly campaigns: CampaignsService) {}
+  constructor(
+    private readonly campaignsService: CampaignsService,
+    @Inject(CACHE_MANAGER) private cacheManager: Keyv,
+  ) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   async create(
     @Body() body: CreateCampaignDto,
     @Req() req: Request & { user: any },
   ) {
     const userId = req.user?.sub as string;
-    return this.campaigns.createCampaign(userId, body);
+    return this.campaignsService.createCampaign(userId, body);
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
   async update(
     @Param('id') id: string,
     @Body() body: UpdateCampaignDto,
@@ -46,10 +61,11 @@ export class CampaignsController {
       throw new BadRequestException(
         `Cannot update protected fields: ${illegal.join(', ')}`,
       );
-  constructor(
-    private readonly campaignsService: CampaignsService,
-    @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) {}
+    }
+
+    const userId = req.user?.sub as string;
+    return this.campaignsService.updateCampaign(userId, id, body);
+  }
 
   /**
    * GET /campaigns
@@ -65,9 +81,8 @@ export class CampaignsController {
     const cacheKey = this.generateCacheKey(query);
 
     // Try to get from cache
-    const cached = await this.cacheManager.get<BrowseCampaignsResponseDto>(
-      cacheKey,
-    );
+    const cached =
+      (await this.cacheManager.get(cacheKey)) as BrowseCampaignsResponseDto | undefined;
     if (cached) {
       return cached;
     }
@@ -79,6 +94,11 @@ export class CampaignsController {
     await this.cacheManager.set(cacheKey, result, 30000);
 
     return result;
+  }
+
+  @Get('featured')
+  async featured() {
+    return this.campaignsService.getFeaturedCampaigns();
   }
 
   /**
@@ -105,5 +125,16 @@ export class CampaignsController {
     }
 
     return parts.join(':');
+  }
+}
+
+@Controller('admin/campaigns')
+export class AdminCampaignsController {
+  constructor(private readonly campaignsService: CampaignsService) {}
+
+  @Post(':id/feature')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async feature(@Param('id') id: string) {
+    return this.campaignsService.featureCampaign(id);
   }
 }
