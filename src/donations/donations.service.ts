@@ -26,7 +26,7 @@ export class DonationsService {
 
     const donationData: Prisma.DonationCreateInput = {
       amount: dto.amount,
-      assetCode: dto.assetCode ?? 'XLM',
+      assetCode: dto.assetCode || 'XLM',
       txHash: dto.txHash || null,
       status: 'PENDING',
       donor: { connect: { id: userId } },
@@ -36,8 +36,8 @@ export class DonationsService {
     let tip: PlatformTipResponseDto | null = null;
 
     if (dto.tipAmount) {
-      const tipAmount = parseFloat(dto.tipAmount);
-      if (tipAmount <= 0) {
+      const tipAmountValue = parseFloat(dto.tipAmount);
+      if (tipAmountValue <= 0) {
         throw new BadRequestException('Tip amount must be greater than 0');
       }
 
@@ -79,11 +79,13 @@ export class DonationsService {
       include: { tip: true },
     });
 
+    const totalIncrement = parseFloat(dto.amount) + (dto.tipAmount ? parseFloat(dto.tipAmount) : 0);
+
     await this.prisma.campaign.update({
       where: { id: dto.campaignId },
       data: {
         raisedAmount: {
-          increment: parseFloat(dto.amount) + (dto.tipAmount ? parseFloat(dto.tipAmount) : 0),
+          increment: totalIncrement,
         },
       },
     });
@@ -233,27 +235,16 @@ export class DonationsService {
   }
 
   async getTipRevenue() {
-    const tips = await this.prisma.platformTip.findMany({
+    const result = await this.prisma.platformTip.aggregate({
       where: { status: 'CONFIRMED' },
-      select: {
-        amount: true,
-        assetCode: true,
-        createdAt: true,
-      },
+      _sum: { amount: true },
+      _count: true,
     });
 
-    const totalRevenue = tips.reduce((sum, tip) => {
-      return sum + parseFloat(tip.amount.toString());
-    }, 0);
-
     return {
-      totalTips: tips.length,
-      totalRevenue,
+      totalTips: result._count,
+      totalRevenue: result._sum.amount?.toString() || '0',
       currency: 'XLM',
-      tipsByAsset: tips.reduce((acc, tip) => {
-        acc[tip.assetCode] = (acc[tip.assetCode] || 0) + parseFloat(tip.amount.toString());
-        return acc;
-      }, {} as Record<string, number>),
     };
   }
 
