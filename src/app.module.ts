@@ -8,6 +8,7 @@ import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { StellarModule } from './stellar/stellar.module';
 import { AdminModule } from './admin/admin.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DonationsModule } from './donations/donations.module';
@@ -15,6 +16,8 @@ import { AppThrottlerModule } from './throttler/throttler.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { StellarModule } from './stellar/stellar.module';
 import { ContractsModule } from './contracts/contracts.module';
+import { UsersModule } from './users/users.module';
+import { MilestonesModule } from './milestones/milestones.module';
 
 @Module({
   imports: [
@@ -35,6 +38,8 @@ import { ContractsModule } from './contracts/contracts.module';
     DonationsModule,
     StellarModule,
     ContractsModule,
+    UsersModule,
+    MilestonesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

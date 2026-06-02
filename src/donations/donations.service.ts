@@ -1,3 +1,39 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { CampaignsService } from '../campaigns/campaigns.service';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  StellarAcceptedAsset,
+  StellarTransactionsService,
+} from '../stellar/stellar-transactions.service.js';
+import { CreateDonationDto } from './dto/create-donation.dto';
+
+@Injectable()
+export class DonationsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly campaigns: CampaignsService,
+    private readonly stellarTxs: StellarTransactionsService,
+  ) {}
+
+  private get db(): any {
+    return this.prisma as any;
+  }
+
+  async createDonation(walletAddress: string, dto: CreateDonationDto) {
+    if (!walletAddress) {
+      throw new BadRequestException('Missing walletAddress in token');
+    }
+
+    const existing = await this.db.donation.findUnique({
+      where: { txHash: dto.txHash },
+    });
+    if (existing) {
+      return existing;
+    }
+
+    const campaign = await this.db.campaign.findUnique({
+      where: { id: dto.campaignId },
+    });
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
@@ -20,6 +56,101 @@ export class DonationsService {
       throw new NotFoundException('Campaign not found');
     }
 
+    if (!campaign.contractId) {
+      throw new BadRequestException('Campaign contractId is not set');
+    }
+
+    const requestedAsset = parseAsset(dto.assetCode, dto.assetIssuer);
+    const acceptedAssets = coerceAcceptedAssets(campaign.acceptedAssets);
+
+    await this.stellarTxs.verifyDonationTransaction({
+      txHash: dto.txHash,
+      destination: campaign.contractId,
+      amount: dto.amount,
+      asset: requestedAsset,
+      acceptedAssets,
+    });
+
+    const donor = await this.getOrCreateUserByWallet(walletAddress);
+
+    const created = await this.db.donation.create({
+      data: {
+        donorId: donor.id,
+        campaignId: campaign.id,
+        amount: dto.amount,
+        assetCode: dto.assetCode.toUpperCase(),
+        assetIssuer: requestedAsset.assetType === 'credit' ? requestedAsset.issuer : null,
+        txHash: dto.txHash,
+        isAnonymous: dto.isAnonymous ?? false,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+        donatedAt: new Date(),
+      },
+    });
+
+    await this.campaigns.recalculateCampaignStats(campaign.id);
+
+    return created;
+  }
+
+  private async getOrCreateUserByWallet(walletAddress: string) {
+    const existing = await this.db.user.findUnique({
+      where: { walletAddress },
+    });
+    if (existing) return existing;
+
+    return this.db.user.create({
+      data: {
+        walletAddress,
+        email: `${walletAddress}@stellaraid.local`,
+        role: 'DONOR',
+      },
+    });
+  }
+}
+
+function parseAsset(assetCode: string, assetIssuer?: string): StellarAcceptedAsset {
+  const code = String(assetCode ?? '').trim();
+  if (!code) {
+    throw new BadRequestException('assetCode is required');
+  }
+
+  if (code.toUpperCase() === 'XLM') {
+    return { assetType: 'native' };
+  }
+
+  const issuer = String(assetIssuer ?? '').trim();
+  if (!issuer) {
+    throw new BadRequestException('assetIssuer is required for non-native assets');
+  }
+
+  return { assetType: 'credit', code, issuer };
+}
+
+function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    return [{ assetType: 'native' }];
+  }
+
+  const parsed: StellarAcceptedAsset[] = [];
+  for (const item of value) {
+    if (item && typeof item === 'object') {
+      const assetType = (item as any).assetType;
+      if (assetType === 'native') {
+        parsed.push({ assetType: 'native' });
+        continue;
+      }
+      if (assetType === 'credit') {
+        const code = String((item as any).code ?? '');
+        const issuer = String((item as any).issuer ?? '');
+        if (code && issuer) {
+          parsed.push({ assetType: 'credit', code, issuer });
+        }
+      }
+    }
+  }
+
+  return parsed.length > 0 ? parsed : [{ assetType: 'native' }];
     if (campaign.status !== 'ACTIVE') {
       throw new BadRequestException('Campaign is not accepting donations');
     }
@@ -29,6 +160,7 @@ export class DonationsService {
       assetCode: dto.assetCode || 'XLM',
       txHash: dto.txHash || null,
       status: 'PENDING',
+      isAnonymous: dto.isAnonymous ?? false,
       donor: { connect: { id: userId } },
       campaign: { connect: { id: dto.campaignId } },
     };
@@ -289,5 +421,246 @@ export class DonationsService {
     }
 
     return tip;
+  }
+
+  /**
+   * Get paginated donations for a campaign (public leaderboard)
+   */
+  async getCampaignDonations(
+    campaignId: string,
+    page: number = 1,
+    limit: number = 20,
+    sortBy: 'amount' | 'createdAt' = 'amount',
+    order: 'asc' | 'desc' = 'desc',
+  ) {
+    // Verify campaign exists
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Campaign not found');
+    }
+
+    const skip = (page - 1) * limit;
+
+    // Build orderBy
+    const orderByClause = {};
+    orderByClause[sortBy] = order;
+
+    // Get total count
+    const total = await this.prisma.donation.count({
+      where: {
+        campaignId,
+        status: 'CONFIRMED',
+      },
+    });
+
+    // Get paginated donations
+    const donations = await this.prisma.donation.findMany({
+      where: {
+        campaignId,
+        status: 'CONFIRMED',
+      },
+      include: {
+        donor: {
+          select: {
+            walletAddress: true,
+          },
+        },
+      },
+      orderBy: orderByClause,
+      skip,
+      take: limit,
+    });
+
+    // Add rank and format response; mask wallet for anonymous donations
+    const donationsWithRank = donations.map((donation, index) => ({
+      rank: skip + index + 1,
+      walletAddress: donation.isAnonymous
+        ? 'Anonymous'
+        : (donation.donor?.walletAddress ?? 'Anonymous'),
+      amount: donation.amount.toString(),
+      assetCode: donation.assetCode,
+      createdAt: donation.createdAt,
+      txHash: donation.txHash,
+    }));
+
+    return {
+      donations: donationsWithRank,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Get user's personal donation history with filters and sorting
+   */
+  async getUserDonationHistory(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    sortBy: 'amount' | 'createdAt' = 'createdAt',
+    order: 'asc' | 'desc' = 'desc',
+    campaignId?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    // Build where clause
+    const where: Prisma.DonationWhereInput = {
+      donorId: userId,
+      status: 'CONFIRMED',
+    };
+
+    if (campaignId) {
+      where.campaignId = campaignId;
+    }
+
+    if (startDate || endDate) {
+      where.donatedAt = {};
+      if (startDate) {
+        where.donatedAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        where.donatedAt.lte = new Date(endDate);
+      }
+    }
+
+    // Build orderBy
+    const orderByClause = {};
+    orderByClause[sortBy] = order;
+
+    // Get total count
+    const total = await this.prisma.donation.count({ where });
+
+    // Get paginated donations
+    const donations = await this.prisma.donation.findMany({
+      where,
+      include: {
+        campaign: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: orderByClause,
+      skip,
+      take: limit,
+    });
+
+    // Format response
+    const donationHistory = donations.map((donation) => ({
+      id: donation.id,
+      amount: donation.amount.toString(),
+      assetCode: donation.assetCode,
+      status: donation.status,
+      campaignId: donation.campaignId,
+      campaignTitle: donation.campaign?.title || 'Unknown Campaign',
+      campaignStatus: donation.campaign?.status || 'UNKNOWN',
+      txHash: donation.txHash,
+      donatedAt: donation.donatedAt,
+      createdAt: donation.createdAt,
+    }));
+
+    // Calculate summary
+    const totalDonatedResult = await this.prisma.donation.aggregate({
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: true,
+    });
+
+    const totalDonated = totalDonatedResult._sum.amount?.toString() || '0';
+    const totalDonations = totalDonatedResult._count;
+    const averageDonation =
+      totalDonations > 0
+        ? (parseFloat(totalDonated) / totalDonations).toString()
+        : '0';
+
+    return {
+      donations: donationHistory,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+      summary: {
+        totalDonated,
+        totalDonations,
+        averageDonation,
+      },
+    };
+  }
+
+  /**
+   * Export user's donation history as CSV
+   */
+  async exportUserDonationsAsCSV(
+    userId: string,
+    campaignId?: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<string> {
+    // Build where clause
+    const where: Prisma.DonationWhereInput = {
+      donorId: userId,
+      status: 'CONFIRMED',
+    };
+
+    if (campaignId) {
+      where.campaignId = campaignId;
+    }
+
+    if (startDate || endDate) {
+      where.donatedAt = {};
+      if (startDate) {
+        where.donatedAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        where.donatedAt.lte = new Date(endDate);
+      }
+    }
+
+    // Get all donations for export
+    const donations = await this.prisma.donation.findMany({
+      where,
+      include: {
+        campaign: {
+          select: {
+            title: true,
+          },
+        },
+      },
+      orderBy: { donatedAt: 'desc' },
+    });
+
+    // Build CSV header
+    const headers = ['Campaign', 'Amount', 'Asset', 'Date', 'Tx Hash', 'USD Equivalent'];
+    const rows: string[] = [headers.map((h) => `"${h}"`).join(',')];
+
+    // Add data rows (USD equivalent would typically be fetched from cache/DB)
+    for (const donation of donations) {
+      const row = [
+        `"${donation.campaign?.title || 'Unknown'}"`,
+        donation.amount.toString(),
+        donation.assetCode,
+        donation.donatedAt.toISOString().split('T')[0], // Date only
+        `"${donation.txHash || ''}"`,
+        '0.00', // Placeholder - in production, fetch from price cache
+      ];
+      rows.push(row.join(','));
+    }
+
+    return rows.join('\n');
   }
 }
