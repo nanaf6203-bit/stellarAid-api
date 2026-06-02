@@ -11,6 +11,10 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { AdminModule } from './admin/admin.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DonationsModule } from './donations/donations.module';
+import { AppThrottlerModule } from './throttler/throttler.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
+import { StellarModule } from './stellar/stellar.module';
+import { ContractsModule } from './contracts/contracts.module';
 
 @Module({
   imports: [
@@ -29,6 +33,8 @@ import { DonationsModule } from './donations/donations.module';
     ApiKeysModule,
     CampaignsModule,
     DonationsModule,
+    StellarModule,
+    ContractsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

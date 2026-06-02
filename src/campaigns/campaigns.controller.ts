@@ -13,6 +13,8 @@ import {
   Inject,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { CampaignsService } from './campaigns.service';
 import { CampaignStats } from './interfaces/campaign-stats.interface';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -31,6 +33,10 @@ const FORBIDDEN_FIELDS = [
 @Controller('campaigns')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 export class CampaignsController {
+  constructor(
+    private readonly campaignsService: CampaignsService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {}
 
   @Get(':id/stats')
   @Roles('creator', 'admin')
@@ -38,10 +44,7 @@ export class CampaignsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<CampaignStats> {
     return this.campaignsService.getCampaignStats(id);
-  constructor(
-    private readonly campaignsService: CampaignsService,
-    @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) {}
+  }
 
   @Post()
   async create(
