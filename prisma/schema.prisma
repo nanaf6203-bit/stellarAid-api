@@ -151,10 +151,14 @@ model Campaign {
   id           String         @id @default(uuid())
   title        String
   description  String
+  story        String?
   goalAmount   Decimal        @db.Decimal(20, 7)
   raisedAmount Decimal        @default(0) @db.Decimal(20, 7)
   status       CampaignStatus @default(DRAFT)
   creatorId    String
+  contractId   String?
+  acceptedAssets Json?
+  isFeatured   Boolean        @default(false)
   startDate    DateTime?
   endDate      DateTime?
   imageUrl     String?
@@ -173,6 +177,7 @@ model Campaign {
   @@index([status])
   @@index([createdAt])
   @@index([category])
+  @@index([isFeatured])
   @@map("campaigns")
 }
 
@@ -181,7 +186,9 @@ model Donation {
   id          String         @id @default(uuid())
   amount      Decimal        @db.Decimal(20, 7)
   assetCode   String         @default("XLM")
-  txHash      String?        @unique
+  assetIssuer String?
+  txHash      String         @unique
+  isAnonymous Boolean        @default(false)
   status      DonationStatus @default(PENDING)
   donorId     String
   campaignId  String
@@ -199,7 +206,6 @@ model Donation {
   disputes Dispute[]
   tip      PlatformTip? @relation(fields: [tipId], references: [id])
 
-  @@unique([donorId, campaignId, txHash])
   @@index([donorId])
   @@index([campaignId])
   @@index([status])

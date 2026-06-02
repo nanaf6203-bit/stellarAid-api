@@ -8,6 +8,7 @@ import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { StellarModule } from './stellar/stellar.module';
 import { AdminModule } from './admin/admin.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DonationsModule } from './donations/donations.module';
@@ -29,6 +30,7 @@ import { DonationsModule } from './donations/donations.module';
     ApiKeysModule,
     CampaignsModule,
     DonationsModule,
+    StellarModule,
   ],
   controllers: [AppController],
   providers: [AppService],
