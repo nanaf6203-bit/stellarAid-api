@@ -14,8 +14,9 @@ import {
   Inject,
   UseGuards,
 } from '@nestjs/common';
-import Keyv from 'keyv';
 import { AuthGuard } from '@nestjs/passport';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { CampaignsService } from './campaigns.service';
 import { CampaignStats } from './interfaces/campaign-stats.interface';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -27,6 +28,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../users/guards/admin.guard';
 import { BrowseCampaignsQueryDto, BrowseCampaignsResponseDto } from './dto/browse-campaigns.dto';
 import { DonationsService } from '../donations/donations.service';
+import { ContractBalanceResponseDto } from './dto/contract-balance.dto';
 import { GetCampaignDonationsQueryDto, GetCampaignDonationsResponseDto } from '../donations/dto/get-campaign-donations.dto';
 import { CreateUpdateDto } from './dto/create-update.dto';
 
@@ -105,6 +107,18 @@ export class CampaignsController {
   }
 
   /**
+   * GET /campaigns/:id/contract-balance
+   * Fetch on-chain balances for the campaign's Stellar contract account.
+   * Discrepancies between on-chain and stored amounts are flagged and auto-corrected.
+   */
+  @Get(':id/contract-balance')
+  async getContractBalance(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ContractBalanceResponseDto> {
+    return this.campaignsService.getContractBalance(id);
+  }
+
+  /**
    * GET /campaigns/:campaignId/donations
    * Get paginated donations for a campaign (public leaderboard)
    */
@@ -152,6 +166,15 @@ export class CampaignsController {
     const userId = req.user?.sub as string;
     const isAdmin = req.user?.role === 'ADMIN';
     await this.campaignsService.deleteUpdate(id, updateId, userId, isAdmin);
+   * GET /campaigns/:id/updates
+   * Public endpoint – returns paginated campaign updates sorted by createdAt DESC
+   */
+  @Get(':id/updates')
+  async getCampaignUpdates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page = 1,
+  ) {
+    return this.campaignsService.getCampaignUpdates(id, Number(page));
   }
 
   private generateCacheKey(query: BrowseCampaignsQueryDto): string {

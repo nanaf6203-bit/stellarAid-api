@@ -1,18 +1,22 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { StellarTransactionsService } from '../stellar/stellar-transactions.service';
 import { BrowseCampaignsQueryDto, BrowseCampaignsResponseDto } from './dto/browse-campaigns.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { ContractBalanceResponseDto } from './dto/contract-balance.dto';
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly stellarTransactions: StellarTransactionsService,
+  ) {}
 
   async createCampaign(userId: string, dto: CreateCampaignDto) {
     const milestoneCreates = (dto.milestones || []).map((m) => ({
@@ -53,7 +57,7 @@ export class CampaignsService {
       throw new NotFoundException('Campaign not found');
     }
 
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id: campaignId },
       data: {
         title: dto.title ?? campaign.title,
@@ -62,7 +66,6 @@ export class CampaignsService {
         imageUrl: dto.coverImageUrl ?? campaign.imageUrl,
       },
     });
-  }
 
   /**
    * Browse public campaigns with pagination, filtering, and sorting
@@ -170,6 +173,49 @@ export class CampaignsService {
     });
   }
 
+  async getContractBalance(campaignId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Campaign not found');
+    }
+
+    if (!campaign.contractId) {
+      throw new BadRequestException('Campaign has no contractId set');
+    }
+
+    const balances = await this.stellarTransactions.getContractBalances(campaign.contractId);
+
+    // Calculate total on-chain balance
+    let onChainTotal = 0;
+    for (const b of balances) {
+      onChainTotal += parseFloat(b.balance);
+    }
+
+    const storedRaisedAmount = parseFloat(campaign.raisedAmount.toString());
+    const discrepancyDetected = Math.abs(onChainTotal - storedRaisedAmount) > 0.0001;
+
+    // If discrepancy detected, update the stored raisedAmount
+    if (discrepancyDetected) {
+      await this.prisma.campaign.update({
+        where: { id: campaignId },
+        data: {
+          raisedAmount: onChainTotal,
+        },
+      });
+    }
+
+    return {
+      contractId: campaign.contractId,
+      balances,
+      storedRaisedAmount: campaign.raisedAmount.toString(),
+      onChainTotal: onChainTotal.toString(),
+      discrepancyDetected,
+    };
+  }
+
   async recalculateCampaignStats(campaignId: string) {
     const agg = await this.prisma.donation.aggregate({
       where: {
@@ -188,168 +234,66 @@ export class CampaignsService {
   }
 
   /**
-   * Get campaign statistics (GET /campaigns/:id/stats)
+   * GET /campaigns/:id/updates
+   * Returns paginated updates sorted by createdAt DESC (10 per page).
    */
+  async getCampaignUpdates(campaignId: string, page = 1) {
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { id: true },
+    });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign ${campaignId} not found`);
+    }
+
+    const [total, updates] = await this.prisma.$transaction([
+      this.prisma.update.count({ where: { campaignId } }),
+      this.prisma.update.findMany({
+        where: { campaignId },
+        select: {
+          id: true,
+          title: true,
+          content: true,
+          imageUrl: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    // Normalise imageUrl → imageUrls array as described in the issue
+    const data = updates.map(({ imageUrl, ...u }) => ({
+      ...u,
+      imageUrls: imageUrl ? [imageUrl] : [],
+    }));
+
+    return { data, total, page, limit };
+  }
+
   async getCampaignStats(campaignId: string) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
     });
-
     if (!campaign) {
-      throw new NotFoundException('Campaign not found');
+      throw new NotFoundException(`Campaign ${campaignId} not found`);
     }
 
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const totals = await this.prisma.donation.aggregate({
+    const donations = await this.prisma.donation.findMany({
       where: { campaignId, status: 'CONFIRMED' },
-      _sum: { amount: true },
-      _count: { donorId: true },
-      _avg: { amount: true },
+      select: { amount: true, donorId: true, assetCode: true, createdAt: true },
     });
 
-    const uniqueAssets = await this.prisma.donation.findMany({
-      where: { campaignId, status: 'CONFIRMED' },
-      select: { assetCode: true },
-      distinct: ['assetCode'],
-    });
+    const totalRaised = donations.reduce((sum, d) => sum + Number(d.amount), 0);
+    const donorCount = new Set(donations.map((d) => d.donorId)).size;
+    const uniqueAssets = [...new Set(donations.map((d) => d.assetCode))];
+    const avgDonation = donations.length ? totalRaised / donations.length : 0;
 
-    const donationsPerDay = await this.prisma.$queryRaw<
-      { date: string; count: bigint; total: number }[]
-    >`
-      SELECT
-        TO_CHAR(d."createdAt", 'YYYY-MM-DD') AS date,
-        COUNT(*)::int AS count,
-        SUM(d.amount)::decimal AS total
-      FROM donations d
-      WHERE d."campaignId" = ${campaignId}::uuid
-        AND d."createdAt" >= ${thirtyDaysAgo}
-      GROUP BY TO_CHAR(d."createdAt", 'YYYY-MM-DD')
-      ORDER BY date ASC
-    `;
-
-    const topDonors = await this.prisma.donation.groupBy({
-      by: ['donorId'],
-      where: { campaignId, status: 'CONFIRMED' },
-      _sum: { amount: true },
-      _count: true,
-      orderBy: { _sum: { amount: 'desc' } },
-      take: 10,
-    });
-
-    return {
-      campaignId,
-      totalRaised: Number(totals._sum.amount ?? 0),
-      donorCount: totals._count.donorId,
-      uniqueAssets: uniqueAssets.map((r) => r.assetCode),
-      avgDonation: Number(totals._avg.amount ?? 0),
-      donationsPerDay: donationsPerDay.map((r) => ({
-        date: r.date,
-        count: Number(r.count),
-        total: Number(r.total),
-      })),
-      topDonors: topDonors.map((r) => ({
-        donorId: r.donorId,
-        totalDonated: Number(r._sum.amount ?? 0),
-        donationCount: r._count,
-      })),
-    };
-  }
-
-  /**
-   * Create a campaign update (POST /campaigns/:id/updates)
-   * Only the campaign creator can post updates.
-   * Triggers a notification to all campaign donors.
-   */
-  async createUpdate(
-    campaignId: string,
-    creatorId: string,
-    dto: { title: string; content: string; imageUrls?: string[] },
-  ) {
-    const campaign = await this.prisma.campaign.findUnique({
-      where: { id: campaignId },
-    });
-
-    if (!campaign) {
-      throw new NotFoundException('Campaign not found');
-    }
-
-    if (campaign.creatorId !== creatorId) {
-      throw new ForbiddenException('Only the campaign creator can post updates');
-    }
-
-    const update = await this.prisma.update.create({
-      data: {
-        campaignId,
-        creatorId,
-        title: dto.title,
-        content: dto.content,
-        imageUrls: dto.imageUrls?.length ? dto.imageUrls : undefined,
-      },
-    });
-
-    // Trigger notifications to all campaign donors
-    await this.notifyCampaignDonors(campaignId, update.title);
-
-    return update;
-  }
-
-  /**
-   * Soft-delete a campaign update (DELETE /campaigns/:id/updates/:updateId)
-   * Creator or admin can delete. Sets deletedAt and returns 204.
-   */
-  async deleteUpdate(
-    campaignId: string,
-    updateId: string,
-    userId: string,
-    isAdmin: boolean,
-  ): Promise<void> {
-    const update = await this.prisma.update.findUnique({
-      where: { id: updateId },
-    });
-
-    if (!update || update.campaignId !== campaignId) {
-      throw new NotFoundException('Update not found for this campaign');
-    }
-
-    if (update.deletedAt) {
-      throw new NotFoundException('Update not found');
-    }
-
-    if (!isAdmin && update.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator or an admin can delete updates');
-    }
-
-    await this.prisma.update.update({
-      where: { id: updateId },
-      data: { deletedAt: new Date() },
-    });
-  }
-
-  /**
-   * Create notifications for all distinct donors of a campaign.
-   */
-  private async notifyCampaignDonors(campaignId: string, updateTitle: string): Promise<void> {
-    const donors = await this.prisma.donation.findMany({
-      where: { campaignId, status: 'CONFIRMED' },
-      select: { donorId: true },
-      distinct: ['donorId'],
-    });
-
-    if (donors.length === 0) return;
-
-    const notificationData = donors.map((d) => ({
-      userId: d.donorId,
-      type: 'CAMPAIGN_UPDATED' as const,
-      title: 'Campaign Update',
-      message: `A new update "${updateTitle}" has been posted for a campaign you donated to.`,
-      relatedId: campaignId,
-    }));
-
-    await this.prisma.notification.createMany({
-      data: notificationData,
-    });
+    return { campaignId, totalRaised, donorCount, uniqueAssets, avgDonation };
   }
 
   private async browseCampaignsWithFullTextSearch(input: {
