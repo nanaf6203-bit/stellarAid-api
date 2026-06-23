@@ -127,7 +127,6 @@ model User {
   notificationPreference NotificationPreference?
   disputes               Dispute[]               @relation("DisputeFiler")
   tips                   PlatformTip[]
-  newsLetterSub          Newsletter?
   auditLogs              AuditLog[]
   apiKeys                ApiKey[]
   fundReleases           FundRelease[]
@@ -377,16 +376,12 @@ model Dispute {
 /// Newsletter model for newsletter subscriptions
 model Newsletter {
   id             String    @id @default(uuid())
-  userId         String    @unique
   email          String    @unique
   isSubscribed   Boolean   @default(true)
   subscribedAt   DateTime  @default(now())
   unsubscribedAt DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([email])
   @@index([isSubscribed])

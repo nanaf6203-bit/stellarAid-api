@@ -18,6 +18,7 @@ import { StellarModule } from './stellar/stellar.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { UsersModule } from './users/users.module';
 import { MilestonesModule } from './milestones/milestones.module';
+import { NewsletterModule } from './newsletter/newsletter.module';
 
 @Module({
   imports: [
@@ -38,9 +39,9 @@ import { MilestonesModule } from './milestones/milestones.module';
     ContractsModule,
     DonationsModule,
     StellarModule,
-    ContractsModule,
     UsersModule,
     MilestonesModule,
+    NewsletterModule,
   ],
   controllers: [AppController],
   providers: [AppService],
