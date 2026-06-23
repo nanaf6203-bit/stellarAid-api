@@ -1,5 +1,5 @@
 
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query } from '@nestjs/common';
 import { NewsletterService } from './newsletter.service';
 import { CreateSubscriberDto } from './dto/create-subscriber.dto';
 
@@ -10,5 +10,10 @@ export class NewsletterController {
   @Post('subscribe')
   async subscribe(@Body() createSubscriberDto: CreateSubscriberDto) {
     return this.newsletterService.subscribe(createSubscriberDto);
+  }
+
+  @Get('unsubscribe')
+  async unsubscribe(@Query('token') token: string) {
+    return this.newsletterService.unsubscribe(token);
   }
 }

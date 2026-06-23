@@ -377,6 +377,7 @@ model Dispute {
 model Newsletter {
   id             String    @id @default(uuid())
   email          String    @unique
+  token          String    @unique
   isSubscribed   Boolean   @default(true)
   subscribedAt   DateTime  @default(now())
   unsubscribedAt DateTime?
