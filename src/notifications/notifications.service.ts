@@ -165,11 +165,14 @@ export class NotificationsService {
     this.logger.log(
       `[EMAIL] To: ${payload.toEmail} | Subject: Your campaign "${payload.campaignTitle}" has been suspended | Reason: ${payload.reason}`,
     );
-    // TODO: replace with real mailer call, e.g.:
-    // await this.emailService.send({
-    //   to: payload.toEmail,
-    //   subject: `Your campaign "${payload.campaignTitle}" has been suspended`,
-    //   html: `...`,
-    // });
+  }
+
+  async sendUserSuspensionEmail(toEmail: string, suspended: boolean, reason?: string): Promise<void> {
+    const subject = suspended ? 'Your account has been suspended' : 'Your account has been reinstated';
+    this.logger.log(`[EMAIL] To: ${toEmail} | Subject: ${subject} | Reason: ${reason ?? 'N/A'}`);
+  }
+
+  async sendDisputeResolutionEmail(toEmail: string, disputeId: string, status: string, resolution?: string): Promise<void> {
+    this.logger.log(`[EMAIL] To: ${toEmail} | Subject: Dispute ${disputeId} ${status} | Resolution: ${resolution ?? 'N/A'}`);
   }
 }
