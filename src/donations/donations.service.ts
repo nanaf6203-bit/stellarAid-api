@@ -1,44 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CampaignsService } from '../campaigns/campaigns.service';
-import { PrismaService } from '../prisma/prisma.service';
-import {
-  StellarAcceptedAsset,
-  StellarTransactionsService,
-} from '../stellar/stellar-transactions.service.js';
-import { CreateDonationDto } from './dto/create-donation.dto';
-
-@Injectable()
-export class DonationsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly campaigns: CampaignsService,
-    private readonly stellarTxs: StellarTransactionsService,
-  ) {}
-
-  private get db(): any {
-    return this.prisma as any;
-  }
-
-  async createDonation(walletAddress: string, dto: CreateDonationDto) {
-    if (!walletAddress) {
-      throw new BadRequestException('Missing walletAddress in token');
-    }
-
-    const existing = await this.db.donation.findUnique({
-      where: { txHash: dto.txHash },
-    });
-    if (existing) {
-      return existing;
-    }
-
-    const campaign = await this.db.campaign.findUnique({
-      where: { id: dto.campaignId },
-    });
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { DonationResponseDto, PlatformTipResponseDto } from './dto/donation.dto';
+
+type StellarAcceptedAsset =
+  | { assetType: 'native' }
+  | { assetType: 'credit'; code: string; issuer: string };
 
 @Injectable()
 export class DonationsService {
@@ -56,101 +24,6 @@ export class DonationsService {
       throw new NotFoundException('Campaign not found');
     }
 
-    if (!campaign.contractId) {
-      throw new BadRequestException('Campaign contractId is not set');
-    }
-
-    const requestedAsset = parseAsset(dto.assetCode, dto.assetIssuer);
-    const acceptedAssets = coerceAcceptedAssets(campaign.acceptedAssets);
-
-    await this.stellarTxs.verifyDonationTransaction({
-      txHash: dto.txHash,
-      destination: campaign.contractId,
-      amount: dto.amount,
-      asset: requestedAsset,
-      acceptedAssets,
-    });
-
-    const donor = await this.getOrCreateUserByWallet(walletAddress);
-
-    const created = await this.db.donation.create({
-      data: {
-        donorId: donor.id,
-        campaignId: campaign.id,
-        amount: dto.amount,
-        assetCode: dto.assetCode.toUpperCase(),
-        assetIssuer: requestedAsset.assetType === 'credit' ? requestedAsset.issuer : null,
-        txHash: dto.txHash,
-        isAnonymous: dto.isAnonymous ?? false,
-        status: 'CONFIRMED',
-        confirmedAt: new Date(),
-        donatedAt: new Date(),
-      },
-    });
-
-    await this.campaigns.recalculateCampaignStats(campaign.id);
-
-    return created;
-  }
-
-  private async getOrCreateUserByWallet(walletAddress: string) {
-    const existing = await this.db.user.findUnique({
-      where: { walletAddress },
-    });
-    if (existing) return existing;
-
-    return this.db.user.create({
-      data: {
-        walletAddress,
-        email: `${walletAddress}@stellaraid.local`,
-        role: 'DONOR',
-      },
-    });
-  }
-}
-
-function parseAsset(assetCode: string, assetIssuer?: string): StellarAcceptedAsset {
-  const code = String(assetCode ?? '').trim();
-  if (!code) {
-    throw new BadRequestException('assetCode is required');
-  }
-
-  if (code.toUpperCase() === 'XLM') {
-    return { assetType: 'native' };
-  }
-
-  const issuer = String(assetIssuer ?? '').trim();
-  if (!issuer) {
-    throw new BadRequestException('assetIssuer is required for non-native assets');
-  }
-
-  return { assetType: 'credit', code, issuer };
-}
-
-function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    return [{ assetType: 'native' }];
-  }
-
-  const parsed: StellarAcceptedAsset[] = [];
-  for (const item of value) {
-    if (item && typeof item === 'object') {
-      const assetType = (item as any).assetType;
-      if (assetType === 'native') {
-        parsed.push({ assetType: 'native' });
-        continue;
-      }
-      if (assetType === 'credit') {
-        const code = String((item as any).code ?? '');
-        const issuer = String((item as any).issuer ?? '');
-        if (code && issuer) {
-          parsed.push({ assetType: 'credit', code, issuer });
-        }
-      }
-    }
-  }
-
-  return parsed.length > 0 ? parsed : [{ assetType: 'native' }];
     if (campaign.status !== 'ACTIVE') {
       throw new BadRequestException('Campaign is not accepting donations');
     }
@@ -158,7 +31,7 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
     const donationData: Prisma.DonationCreateInput = {
       amount: dto.amount,
       assetCode: dto.assetCode || 'XLM',
-      txHash: dto.txHash || null,
+      txHash: dto.txHash || `pending-${Date.now()}-${userId.slice(0, 8)}`,
       status: 'PENDING',
       isAnonymous: dto.isAnonymous ?? false,
       donor: { connect: { id: userId } },
@@ -211,7 +84,8 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
       include: { tip: true },
     });
 
-    const totalIncrement = parseFloat(dto.amount) + (dto.tipAmount ? parseFloat(dto.tipAmount) : 0);
+    const totalIncrement =
+      parseFloat(dto.amount) + (dto.tipAmount ? parseFloat(dto.tipAmount) : 0);
 
     await this.prisma.campaign.update({
       where: { id: dto.campaignId },
@@ -252,12 +126,12 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
         return false;
       }
 
-      const SorobanRpc = (await import('@stellar/stellar-sdk')).SorobanRpc;
-      const server = new SorobanRpc.Server('https://soroban-rpc.stellar.org');
+      const { rpc } = await import('@stellar/stellar-sdk');
+      const server = new rpc.Server('https://soroban-rpc.stellar.org');
 
       const response = await server.getTransaction(txHash);
 
-      if (response.status === 'SUCCESS') {
+      if ((response as any).status === 'SUCCESS') {
         await this.prisma.donation.update({
           where: { txHash },
           data: {
@@ -306,12 +180,12 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
         return false;
       }
 
-      const SorobanRpc = (await import('@stellar/stellar-sdk')).SorobanRpc;
-      const server = new SorobanRpc.Server('https://soroban-rpc.stellar.org');
+      const { rpc } = await import('@stellar/stellar-sdk');
+      const server = new rpc.Server('https://soroban-rpc.stellar.org');
 
       const response = await server.getTransaction(txHash);
 
-      if (response.status === 'SUCCESS') {
+      if ((response as any).status === 'SUCCESS') {
         await this.prisma.platformTip.update({
           where: { txHash },
           data: {
@@ -433,7 +307,6 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
     sortBy: 'amount' | 'createdAt' = 'amount',
     order: 'asc' | 'desc' = 'desc',
   ) {
-    // Verify campaign exists
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
     });
@@ -443,38 +316,23 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
     }
 
     const skip = (page - 1) * limit;
-
-    // Build orderBy
-    const orderByClause = {};
+    const orderByClause: Record<string, string> = {};
     orderByClause[sortBy] = order;
 
-    // Get total count
     const total = await this.prisma.donation.count({
-      where: {
-        campaignId,
-        status: 'CONFIRMED',
-      },
+      where: { campaignId, status: 'CONFIRMED' },
     });
 
-    // Get paginated donations
     const donations = await this.prisma.donation.findMany({
-      where: {
-        campaignId,
-        status: 'CONFIRMED',
-      },
+      where: { campaignId, status: 'CONFIRMED' },
       include: {
-        donor: {
-          select: {
-            walletAddress: true,
-          },
-        },
+        donor: { select: { walletAddress: true } },
       },
       orderBy: orderByClause,
       skip,
       take: limit,
     });
 
-    // Add rank and format response; mask wallet for anonymous donations
     const donationsWithRank = donations.map((donation, index) => ({
       rank: skip + index + 1,
       walletAddress: donation.isAnonymous
@@ -512,7 +370,6 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
   ) {
     const skip = (page - 1) * limit;
 
-    // Build where clause
     const where: Prisma.DonationWhereInput = {
       donorId: userId,
       status: 'CONFIRMED',
@@ -532,31 +389,21 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
       }
     }
 
-    // Build orderBy
-    const orderByClause = {};
+    const orderByClause: Record<string, string> = {};
     orderByClause[sortBy] = order;
 
-    // Get total count
     const total = await this.prisma.donation.count({ where });
 
-    // Get paginated donations
     const donations = await this.prisma.donation.findMany({
       where,
       include: {
-        campaign: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-          },
-        },
+        campaign: { select: { id: true, title: true, status: true } },
       },
       orderBy: orderByClause,
       skip,
       take: limit,
     });
 
-    // Format response
     const donationHistory = donations.map((donation) => ({
       id: donation.id,
       amount: donation.amount.toString(),
@@ -570,12 +417,9 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
       createdAt: donation.createdAt,
     }));
 
-    // Calculate summary
     const totalDonatedResult = await this.prisma.donation.aggregate({
       where,
-      _sum: {
-        amount: true,
-      },
+      _sum: { amount: true },
       _count: true,
     });
 
@@ -588,17 +432,8 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
 
     return {
       donations: donationHistory,
-      pagination: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit),
-      },
-      summary: {
-        totalDonated,
-        totalDonations,
-        averageDonation,
-      },
+      pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+      summary: { totalDonated, totalDonations, averageDonation },
     };
   }
 
@@ -611,7 +446,6 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
     startDate?: string,
     endDate?: string,
   ): Promise<string> {
-    // Build where clause
     const where: Prisma.DonationWhereInput = {
       donorId: userId,
       status: 'CONFIRMED',
@@ -631,32 +465,23 @@ function coerceAcceptedAssets(value: unknown): StellarAcceptedAsset[] {
       }
     }
 
-    // Get all donations for export
     const donations = await this.prisma.donation.findMany({
       where,
-      include: {
-        campaign: {
-          select: {
-            title: true,
-          },
-        },
-      },
+      include: { campaign: { select: { title: true } } },
       orderBy: { donatedAt: 'desc' },
     });
 
-    // Build CSV header
     const headers = ['Campaign', 'Amount', 'Asset', 'Date', 'Tx Hash', 'USD Equivalent'];
     const rows: string[] = [headers.map((h) => `"${h}"`).join(',')];
 
-    // Add data rows (USD equivalent would typically be fetched from cache/DB)
     for (const donation of donations) {
       const row = [
         `"${donation.campaign?.title || 'Unknown'}"`,
         donation.amount.toString(),
         donation.assetCode,
-        donation.donatedAt.toISOString().split('T')[0], // Date only
+        donation.donatedAt.toISOString().split('T')[0],
         `"${donation.txHash || ''}"`,
-        '0.00', // Placeholder - in production, fetch from price cache
+        '0.00',
       ];
       rows.push(row.join(','));
     }

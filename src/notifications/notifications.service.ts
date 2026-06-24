@@ -165,11 +165,25 @@ export class NotificationsService {
     this.logger.log(
       `[EMAIL] To: ${payload.toEmail} | Subject: Your campaign "${payload.campaignTitle}" has been suspended | Reason: ${payload.reason}`,
     );
-    // TODO: replace with real mailer call, e.g.:
-    // await this.emailService.send({
-    //   to: payload.toEmail,
-    //   subject: `Your campaign "${payload.campaignTitle}" has been suspended`,
-    //   html: `...`,
-    // });
+  }
+
+  async getNotifications(userId: string, isRead?: boolean) {
+    return this.prisma.notification.findMany({
+      where: { userId, ...(isRead !== undefined ? { isRead } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
+  async markAllRead(userId: string) {
+    await this.prisma.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
+    return { updated: true };
+  }
+
+  async markOneRead(userId: string, id: string) {
+    const n = await this.prisma.notification.findFirst({ where: { id, userId } });
+    if (!n) return { updated: false };
+    await this.prisma.notification.update({ where: { id }, data: { isRead: true } });
+    return { updated: true };
   }
 }

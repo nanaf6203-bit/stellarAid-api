@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  SorobanRpc,
+  rpc,
   TransactionBuilder,
   Contract,
   Account,
@@ -15,14 +15,14 @@ import {
 
 @Injectable()
 export class SorobanService {
-  private readonly server: SorobanRpc.Server;
+  private readonly server: rpc.Server;
   private readonly networkPassphrase: string;
   private readonly serverKeypair?: Keypair;
   private readonly feeBumpKeypair?: Keypair;
 
   constructor(private readonly config: ConfigService) {
     const rpcUrl = this.config.get<string>('STELLAR_RPC_URL') || 'https://soroban-testnet.stellar.org:443';
-    this.server = new SorobanRpc.Server(rpcUrl);
+    this.server = new rpc.Server(rpcUrl);
     this.networkPassphrase = this.config.get<string>('STELLAR_NETWORK_PASSPHRASE') || 'Test SDF Network ; September 2015';
 
     const serverSecret = this.config.get<string>('STELLAR_SERVER_SECRET');
@@ -44,7 +44,7 @@ export class SorobanService {
     }
   }
 
-  getServer(): SorobanRpc.Server {
+  getServer(): rpc.Server {
     return this.server;
   }
 
@@ -121,9 +121,9 @@ export class SorobanService {
         .setTimeout(30)
         .build();
 
-      let preparedTx: Transaction | FeeBumpTransaction;
+      let preparedTx: Transaction;
       try {
-        preparedTx = await this.server.prepareTransaction(tx);
+        preparedTx = (await this.server.prepareTransaction(tx)) as Transaction;
       } catch (prepError) {
         throw this.parseSimulationError(prepError);
       }
@@ -145,7 +145,7 @@ export class SorobanService {
       const response = await this.server.sendTransaction(finalTx);
 
       if (response.status === 'ERROR') {
-        throw this.parseTxResultError(response.errorResultXdr);
+        throw this.parseTxResultError(response.errorResult?.toXDR('base64') ?? '');
       }
 
       const txResult = await this.pollTransaction(response.hash);
@@ -159,7 +159,7 @@ export class SorobanService {
             const innerSwitch = invokeHostFuncResult.switch().name;
             if (innerSwitch === 'invokeHostFunctionSuccess') {
               const scValResult = invokeHostFuncResult.success();
-              return scValToNative(scValResult);
+              return scValToNative(scValResult as any);
             }
           }
         }

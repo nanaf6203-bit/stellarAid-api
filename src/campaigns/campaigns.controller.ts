@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import type { Cache } from 'cache-manager';
 import { CampaignsService } from './campaigns.service';
 import { CampaignStats } from './interfaces/campaign-stats.interface';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -39,8 +39,6 @@ const FORBIDDEN_FIELDS = [
   'milestones',
   'endDate',
 ];
-
-const CACHE_MANAGER = 'CACHE_MANAGER';
 
 @Controller('campaigns')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -166,6 +164,9 @@ export class CampaignsController {
     const userId = req.user?.sub as string;
     const isAdmin = req.user?.role === 'ADMIN';
     await this.campaignsService.deleteUpdate(id, updateId, userId, isAdmin);
+  }
+
+  /**
    * GET /campaigns/:id/updates
    * Public endpoint – returns paginated campaign updates sorted by createdAt DESC
    */

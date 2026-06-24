@@ -1,35 +1,10 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
-
-export class CreateDonationDto {
-  @IsString()
-  campaignId: string;
-
-  @IsString()
-  txHash: string;
-
-  @IsString()
-  amount: string;
-
-  @IsString()
-  assetCode: string;
-
-  @IsOptional()
-  @IsString()
-  assetIssuer?: string;
-
-  @IsOptional()
-  @Type(() => Boolean)
-  @IsBoolean()
-  isAnonymous?: boolean;
-}
-
 import {
-  IsString,
-  IsOptional,
-  MaxLength,
   IsBoolean,
   IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateDonationDto {
@@ -45,11 +20,17 @@ export class CreateDonationDto {
   @IsString()
   assetCode?: string;
 
+  @IsOptional()
+  @IsString()
+  assetIssuer?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(200)
   txHash?: string;
 
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   isAnonymous?: boolean;
 

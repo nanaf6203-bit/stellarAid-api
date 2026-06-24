@@ -212,9 +212,9 @@ export class MilestonesService {
     for (const stat of stats) {
       result.total += stat._count;
       const status = stat.status.toLowerCase() as keyof typeof result;
-      if (result[status]) {
-        result[status].count = stat._count;
-        result[status].amount = stat._sum.amount?.toString() || '0';
+      if (result[status] && typeof result[status] === 'object') {
+        (result[status] as any).count = stat._count;
+        (result[status] as any).amount = stat._sum.amount?.toString() || '0';
       }
     }
 

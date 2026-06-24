@@ -1,9 +1,9 @@
 import { Injectable, Inject, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
+import type { Queue } from 'bull';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import type { Cache } from 'cache-manager';
 import { Horizon, xdr, scValToNative, StrKey } from '@stellar/stellar-sdk';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_CONTRACT_EVENTS } from '../queue/queue.constants';
@@ -190,21 +190,19 @@ export class StellarEventService implements OnApplicationBootstrap {
   private parseEvents(resultMetaXdr: string): any[] {
     try {
       const meta = xdr.TransactionMeta.fromXDR(resultMetaXdr, 'base64');
-      if (meta.switch().name === 'v3' || meta.switch().value === 3) {
+      const sw = meta.switch() as any;
+      if (sw.name === 'v3' || sw === 3) {
         const sorobanMeta = meta.v3().sorobanMeta();
         if (sorobanMeta) {
           const contractEvents = sorobanMeta.events() || [];
-          return contractEvents.map((event) => {
+          return contractEvents.map((event: any) => {
             const rawContractId = event.contractId();
             const contractId = rawContractId ? StrKey.encodeContract(rawContractId) : null;
-            const topics = (event.topics() || []).map((t) => scValToNative(t));
-            const value = event.value() ? scValToNative(event.value()) : null;
+            const topics = (event.body().v0().topics() || []).map((t: any) => scValToNative(t));
+            const rawValue = event.body().v0().data();
+            const value = rawValue ? scValToNative(rawValue) : null;
 
-            return {
-              contractId,
-              topics,
-              value,
-            };
+            return { contractId, topics, value };
           });
         }
       }

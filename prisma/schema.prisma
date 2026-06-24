@@ -34,6 +34,7 @@ enum CampaignStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+  SUSPENDED
   REJECTED
 }
 
@@ -51,6 +52,7 @@ enum TipStatus {
 }
 
 enum MilestoneStatus {
+  LOCKED
   PENDING
   ACTIVE
   COMPLETED

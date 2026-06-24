@@ -31,15 +31,7 @@ export class ExportProcessor {
     this.logger.log(`Processing donation export for user ${userId}`);
 
     // Build where clause
-    const where: {
-      donorId: string;
-      status: string;
-      campaignId?: string;
-      donatedAt?: { gte?: Date; lte?: Date };
-    } = {
-      donorId: userId,
-      status: 'CONFIRMED',
-    };
+    const where: any = { donorId: userId, status: 'CONFIRMED' };
 
     if (campaignId) {
       where.campaignId = campaignId;

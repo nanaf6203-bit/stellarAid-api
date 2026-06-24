@@ -1,8 +1,6 @@
-
+import { Controller } from '@nestjs/common';
 
 @Controller()
 export class PlatformController {
-    constructor() {
-
-    }
+  constructor() {}
 }

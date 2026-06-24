@@ -19,12 +19,14 @@ export class CampaignsService {
   ) {}
 
   async createCampaign(userId: string, dto: CreateCampaignDto) {
-    const milestoneCreates = (dto.milestones || []).map((m) => ({
-      title: m.title,
-      description: m.description ?? null,
-      targetAmount: m.targetAmount ?? undefined,
-      dueDate: m.dueDate ? new Date(m.dueDate) : undefined,
-    }));
+    const milestoneCreates = (dto.milestones || [])
+      .filter((m) => m.targetAmount != null)
+      .map((m) => ({
+        title: m.title,
+        description: m.description ?? null,
+        targetAmount: m.targetAmount!,
+        dueDate: m.dueDate ? new Date(m.dueDate) : undefined,
+      }));
 
     const acceptedAssets = parseAcceptedAssets(dto.acceptedAssets);
 
@@ -35,9 +37,9 @@ export class CampaignsService {
         story: dto.story ?? null,
         imageUrl: dto.coverImageUrl ?? undefined,
         category: dto.category ?? undefined,
-        goalAmount: dto.goalAmount ?? undefined,
+        goalAmount: dto.goalAmount ?? 0,
         endDate: dto.endDate ? new Date(dto.endDate) : undefined,
-        status: 'ACTIVE',
+        status: 'PENDING_APPROVAL',
         creatorId: userId,
         contractId: dto.contractId ?? undefined,
         acceptedAssets: acceptedAssets.length > 0 ? acceptedAssets : undefined,
@@ -66,6 +68,9 @@ export class CampaignsService {
         imageUrl: dto.coverImageUrl ?? campaign.imageUrl,
       },
     });
+
+    return updated;
+  }
 
   /**
    * Browse public campaigns with pagination, filtering, and sorting
@@ -225,7 +230,7 @@ export class CampaignsService {
       _sum: { amount: true },
     });
 
-    const raisedAmount = agg._sum.amount ?? new Prisma.Decimal(0);
+    const raisedAmount = agg._sum.amount ?? 0;
 
     await this.prisma.campaign.update({
       where: { id: campaignId },
@@ -257,7 +262,7 @@ export class CampaignsService {
           id: true,
           title: true,
           content: true,
-          imageUrl: true,
+          imageUrls: true,
           createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
@@ -266,10 +271,9 @@ export class CampaignsService {
       }),
     ]);
 
-    // Normalise imageUrl → imageUrls array as described in the issue
-    const data = updates.map(({ imageUrl, ...u }) => ({
+    const data = updates.map((u) => ({
       ...u,
-      imageUrls: imageUrl ? [imageUrl] : [],
+      imageUrls: Array.isArray(u.imageUrls) ? u.imageUrls : [],
     }));
 
     return { data, total, page, limit };
@@ -349,6 +353,33 @@ export class CampaignsService {
 
     return { data: ordered, total, page, limit };
   }
+
+  async createUpdate(campaignId: string, userId: string, dto: { title: string; content: string; imageUrls?: string[] }) {
+    const campaign = await this.prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!campaign) throw new NotFoundException(`Campaign ${campaignId} not found`);
+    if (campaign.creatorId !== userId) throw new BadRequestException('Not authorized to update this campaign');
+
+    return this.prisma.update.create({
+      data: {
+        campaignId,
+        creatorId: userId,
+        title: dto.title,
+        content: dto.content,
+        imageUrls: dto.imageUrls ?? [],
+      },
+    });
+  }
+
+  async deleteUpdate(campaignId: string, updateId: string, userId: string, isAdmin: boolean) {
+    const update = await this.prisma.update.findFirst({ where: { id: updateId, campaignId } });
+    if (!update) throw new NotFoundException(`Update ${updateId} not found`);
+    if (!isAdmin && update.creatorId !== userId) throw new BadRequestException('Not authorized');
+
+    await this.prisma.update.update({
+      where: { id: updateId },
+      data: { deletedAt: new Date() },
+    });
+  }
 }
 
 function campaignBrowseSelect() {
@@ -419,7 +450,7 @@ function sqlCampaignFilters(input: { category?: string; status?: string }) {
   const whereSql =
     whereParts.length === 1
       ? whereParts[0]
-      : Prisma.sql`${Prisma.join(whereParts, Prisma.sql` AND `)}`;
+      : Prisma.sql`${Prisma.join(whereParts, ' AND ')}`;
 
   return { whereSql };
 }

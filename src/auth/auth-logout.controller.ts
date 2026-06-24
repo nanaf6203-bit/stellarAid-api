@@ -37,7 +37,7 @@ export class AuthLogoutController {
 
     const walletAddress = user.walletAddress;
     if (walletAddress) {
-      await this.cacheManager.del(`refresh:${walletAddress}`);
+      await this.cacheManager.delete(`refresh:${walletAddress}`);
     }
   }
 }
