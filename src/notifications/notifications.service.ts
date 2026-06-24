@@ -185,5 +185,12 @@ export class NotificationsService {
     if (!n) return { updated: false };
     await this.prisma.notification.update({ where: { id }, data: { isRead: true } });
     return { updated: true };
+  async sendUserSuspensionEmail(toEmail: string, suspended: boolean, reason?: string): Promise<void> {
+    const subject = suspended ? 'Your account has been suspended' : 'Your account has been reinstated';
+    this.logger.log(`[EMAIL] To: ${toEmail} | Subject: ${subject} | Reason: ${reason ?? 'N/A'}`);
+  }
+
+  async sendDisputeResolutionEmail(toEmail: string, disputeId: string, status: string, resolution?: string): Promise<void> {
+    this.logger.log(`[EMAIL] To: ${toEmail} | Subject: Dispute ${disputeId} ${status} | Resolution: ${resolution ?? 'N/A'}`);
   }
 }

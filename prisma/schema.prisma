@@ -87,11 +87,14 @@ enum DisputeStatus {
 
 enum AuditActionType {
   USER_CREATED
+  USER_SUSPENDED
+  USER_UNSUSPENDED
   CAMPAIGN_CREATED
   CAMPAIGN_UPDATED
   DONATION_MADE
   MILESTONE_COMPLETED
   DISPUTE_FILED
+  DISPUTE_RESOLVED
   ADMIN_ACTION
 }
 
@@ -118,6 +121,8 @@ model User {
   avatarUrl     String?
   socialLinks   Json?
   isActive      Boolean   @default(true)
+  isSuspended   Boolean   @default(false)
+  suspensionReason String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -258,7 +263,7 @@ model Milestone {
   title        String
   description  String?
   targetAmount Decimal         @db.Decimal(20, 7)
-  status       MilestoneStatus @default(LOCKED)
+  status       MilestoneStatus @default(PENDING)
   dueDate      DateTime?
   completedAt  DateTime?
   txHash       String?
