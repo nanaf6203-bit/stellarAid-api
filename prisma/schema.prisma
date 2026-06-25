@@ -180,6 +180,8 @@ model Campaign {
   endDate      DateTime?
   imageUrl     String?
   category     String?
+  performanceScore Float        @default(0)
+  shareCount   Int            @default(0)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 

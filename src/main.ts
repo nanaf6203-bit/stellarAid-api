@@ -8,6 +8,13 @@ import {
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.enableCors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    maxAge: 86400, // Preflight caching (24 hours)
+  });
+
   const config = new DocumentBuilder()
     .setTitle('StellarAid API')
     .setDescription('API for StellarAid application')

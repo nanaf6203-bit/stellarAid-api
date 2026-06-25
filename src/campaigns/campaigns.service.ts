@@ -121,8 +121,10 @@ export class CampaignsService {
         orderBy = { endDate: 'asc' };
         break;
       case 'newest':
-      default:
         orderBy = { createdAt: 'desc' };
+        break;
+      default:
+        orderBy = [{ performanceScore: 'desc' }, { createdAt: 'desc' }];
     }
 
     const [total, campaigns] = await this.prisma.$transaction([
@@ -396,6 +398,7 @@ function campaignBrowseSelect() {
     endDate: true,
     imageUrl: true,
     category: true,
+    performanceScore: true,
     isFeatured: true,
     createdAt: true,
     updatedAt: true,
