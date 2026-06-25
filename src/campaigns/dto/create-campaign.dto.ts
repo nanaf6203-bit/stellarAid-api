@@ -72,4 +72,8 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsString()
   endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  walletAddress?: string;
 }

@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StellarTransactionsService } from '../stellar/stellar-transactions.service';
+import { HorizonService } from '../stellar/horizon.service';
 import { BrowseCampaignsQueryDto, BrowseCampaignsResponseDto } from './dto/browse-campaigns.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
@@ -16,9 +17,19 @@ export class CampaignsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stellarTransactions: StellarTransactionsService,
+    private readonly horizonService: HorizonService,
   ) {}
 
   async createCampaign(userId: string, dto: CreateCampaignDto) {
+    if (dto.walletAddress) {
+      const exists = await this.horizonService.accountExists(dto.walletAddress);
+      if (!exists) {
+        throw new BadRequestException(
+          `Stellar account ${dto.walletAddress} does not exist or is not funded`,
+        );
+      }
+    }
+
     const milestoneCreates = (dto.milestones || [])
       .filter((m) => m.targetAmount != null)
       .map((m) => ({

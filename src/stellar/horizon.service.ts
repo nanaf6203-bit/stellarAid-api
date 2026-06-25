@@ -68,6 +68,17 @@ export class HorizonService {
     return this.server;
   }
 
+  /** Check whether a Stellar account exists and is funded. */
+  async accountExists(accountId: string): Promise<boolean> {
+    try {
+      await this.server.loadAccount(accountId);
+      return true;
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err?.message?.includes('404')) return false;
+      throw err;
+    }
+  }
+
   private async withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {

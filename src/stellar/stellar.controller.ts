@@ -50,4 +50,22 @@ export class StellarController {
     if (!prices) throw new NotFoundException('Price data unavailable');
     return prices;
   }
+
+  /** GET /stellar/account/:walletAddress/exists */
+  @Get('account/:walletAddress/exists')
+  async accountExists(
+    @Param('walletAddress') walletAddress: string,
+  ): Promise<{ exists: boolean }> {
+    const server = this.horizonService.getServer();
+    try {
+      await server.loadAccount(walletAddress);
+      return { exists: true };
+    } catch (err: any) {
+      // 404 = account not found or unfunded — return false
+      if (err?.response?.status === 404 || err?.message?.includes('404')) {
+        return { exists: false };
+      }
+      throw err;
+    }
+  }
 }
