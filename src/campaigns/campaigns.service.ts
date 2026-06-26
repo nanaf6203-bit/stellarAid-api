@@ -313,6 +313,87 @@ export class CampaignsService {
     return { campaignId, totalRaised, donorCount, uniqueAssets, avgDonation };
   }
 
+  /**
+   * GET /campaigns/:id/analytics/donations-over-time
+   * Returns donation trends aggregated by day.
+   */
+  async getDonationsOverTime(campaignId: string, days: number = 30) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign ${campaignId} not found`);
+    }
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const donations = await this.prisma.donation.groupBy({
+      where: {
+        campaignId,
+        status: 'CONFIRMED',
+        donatedAt: { gte: startDate },
+      },
+      by: ['donatedAt'],
+      _count: { _all: true },
+      _sum: { amount: true },
+      orderBy: { donatedAt: 'asc' },
+    });
+
+    const result: { date: string; donationCount: number; totalAmount: number }[] = [];
+    const aggregated = new Map<string, { count: number; total: number }>();
+
+    for (const donation of donations) {
+      const dateKey = new Date(donation.donatedAt).toISOString().split('T')[0];
+      const existing = aggregated.get(dateKey) || { count: 0, total: 0 };
+      existing.count += donation._count._all;
+      existing.total += Number(donation._sum.amount ?? 0);
+      aggregated.set(dateKey, existing);
+    }
+
+    const start = new Date(startDate.toISOString().split('T')[0]);
+    const end = new Date();
+    end.setHours(0, 0, 0, 0);
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateKey = d.toISOString().split('T')[0];
+      const data = aggregated.get(dateKey) || { count: 0, total: 0 };
+      result.push({
+        date: dateKey,
+        donationCount: data.count,
+        totalAmount: data.total,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * GET /campaigns/:id/analytics/asset-distribution
+   * Returns donation breakdown by asset code.
+   */
+  async getAssetDistribution(campaignId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+    if (!campaign) {
+      throw new NotFoundException(`Campaign ${campaignId} not found`);
+    }
+
+    const donations = await this.prisma.donation.groupBy({
+      where: { campaignId, status: 'CONFIRMED' },
+      by: ['assetCode'],
+      _count: { _all: true },
+      _sum: { amount: true },
+    });
+
+    return donations.map((d) => ({
+      asset: d.assetCode,
+      donationCount: d._count._all,
+      totalAmount: Number(d._sum.amount ?? 0),
+    }));
+  }
+
   private async browseCampaignsWithFullTextSearch(input: {
     page: number;
     limit: number;

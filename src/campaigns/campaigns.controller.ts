@@ -13,6 +13,7 @@ import {
   Req,
   Inject,
   UseGuards,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -166,16 +167,41 @@ export class CampaignsController {
     await this.campaignsService.deleteUpdate(id, updateId, userId, isAdmin);
   }
 
-  /**
-   * GET /campaigns/:id/updates
-   * Public endpoint – returns paginated campaign updates sorted by createdAt DESC
-   */
+/**
+    * GET /campaigns/:id/updates
+    * Public endpoint – returns paginated campaign updates sorted by createdAt DESC
+    */
   @Get(':id/updates')
   async getCampaignUpdates(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('page') page = 1,
   ) {
     return this.campaignsService.getCampaignUpdates(id, Number(page));
+  }
+
+  /**
+   * GET /campaigns/:id/analytics/donations-over-time
+   * Returns donation trends over time for creator analytics.
+   */
+  @Get(':id/analytics/donations-over-time')
+  @Roles('creator', 'admin')
+  async getDonationsOverTime(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('days', ParseIntPipe) days: number = 30,
+  ) {
+    return this.campaignsService.getDonationsOverTime(id, days);
+  }
+
+  /**
+   * GET /campaigns/:id/analytics/asset-distribution
+   * Returns donation breakdown by asset for creator analytics.
+   */
+  @Get(':id/analytics/asset-distribution')
+  @Roles('creator', 'admin')
+  async getAssetDistribution(
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.campaignsService.getAssetDistribution(id);
   }
 
   private generateCacheKey(query: BrowseCampaignsQueryDto): string {

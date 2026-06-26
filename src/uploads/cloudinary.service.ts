@@ -1,9 +1,11 @@
 import { Injectable, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
+import { createHmac } from 'crypto';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const SIGNED_URL_EXPIRY_SECONDS = 300; // 5 minutes
 
 export interface UploadResult {
   url: string;
@@ -12,13 +14,32 @@ export interface UploadResult {
   height: number;
 }
 
+export interface SignedUploadUrl {
+  url: string;
+  timestamp: number;
+  signature: string;
+  apiKey: string;
+  uploadPreset: string;
+  expiresAt: string;
+}
+
 @Injectable()
 export class CloudinaryService {
+  private readonly apiKey: string;
+  private readonly apiSecret: string;
+  private readonly cloudName: string;
+  private readonly uploadPreset: string;
+
   constructor(config: ConfigService) {
+    this.cloudName = config.get<string>('CLOUDINARY_CLOUD_NAME') ?? '';
+    this.apiKey = config.get<string>('CLOUDINARY_API_KEY') ?? '';
+    this.apiSecret = config.get<string>('CLOUDINARY_API_SECRET') ?? '';
+    this.uploadPreset = config.get<string>('CLOUDINARY_UPLOAD_PRESET') ?? 'stellaraid-upload';
+
     cloudinary.config({
-      cloud_name: config.get<string>('CLOUDINARY_CLOUD_NAME'),
-      api_key: config.get<string>('CLOUDINARY_API_KEY'),
-      api_secret: config.get<string>('CLOUDINARY_API_SECRET'),
+      cloud_name: this.cloudName,
+      api_key: this.apiKey,
+      api_secret: this.apiSecret,
     });
   }
 
@@ -48,5 +69,28 @@ export class CloudinaryService {
         )
         .end(file.buffer);
     });
+  }
+
+  generateSignedUploadUrl(): SignedUploadUrl {
+    if (!this.apiKey || !this.apiSecret || !this.cloudName) {
+      throw new InternalServerErrorException('Cloudinary is not configured properly');
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const expiresAtUnix = timestamp + SIGNED_URL_EXPIRY_SECONDS;
+
+    const paramsToSign = `folder=StellarAid&timestamp=${timestamp}&upload_preset=${this.uploadPreset}${this.apiSecret}`;
+    const signature = createHmac('sha256', this.apiSecret)
+      .update(paramsToSign)
+      .digest('hex');
+
+    return {
+      url: `https://api.cloudinary.com/v1_1/${this.cloudName}/image/upload`,
+      timestamp,
+      signature,
+      apiKey: this.apiKey,
+      uploadPreset: this.uploadPreset,
+      expiresAt: new Date(expiresAtUnix * 1000).toISOString(),
+    };
   }
 }

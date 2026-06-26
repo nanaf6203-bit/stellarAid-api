@@ -4,6 +4,7 @@ import {
   UploadedFile,
   UseInterceptors,
   BadRequestException,
+  Get,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -12,6 +13,16 @@ import { CloudinaryService } from './cloudinary.service';
 @Controller('uploads')
 export class UploadsController {
   constructor(private readonly cloudinary: CloudinaryService) {}
+
+  /**
+   * POST /uploads/signed-url
+   * Returns a signed Cloudinary upload URL for direct-to-cloud uploads.
+   * URL expires in 5 minutes and is bound to the upload preset.
+   */
+  @Post('signed-url')
+  async getSignedUploadUrl() {
+    return this.cloudinary.generateSignedUploadUrl();
+  }
 
   /**
    * POST /uploads/image
