@@ -1,83 +1,57 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as morgan from 'morgan';
 import { AppModule } from './app.module';
-import {
-  DocumentBuilder,
-  SwaggerModule,
-} from '@nestjs/swagger';
-import helmet from 'helmet';
-import { json, urlencoded } from 'express';
+import { AllExceptionsFilter } from './filters/all-exceptions.filter';
+import { logger } from './logger/logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { logger: false });
 
-  // Security headers — issue #323
+  const configService = app.get(ConfigService);
+  const port = configService.get<number>('PORT', 3000);
+  const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+
+  const allowedOrigins = configService
+    .get<string>('ALLOWED_ORIGINS', '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
+    credentials: true,
+  });
+
   app.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", 'data:', 'https:'],
-        },
-      },
+    morgan(nodeEnv === 'production' ? 'combined' : 'dev', {
+      stream: { write: (message: string) => logger.http(message.trim()) },
     }),
   );
 
-  // Body size limits — issue #325
-  app.use(json({ limit: process.env.JSON_BODY_LIMIT ?? '1mb' }));
-  app.use(urlencoded({ extended: true, limit: process.env.FILE_UPLOAD_LIMIT ?? '5mb' }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      stopAtFirstError: false,
+    }),
+  );
 
-  app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    maxAge: 86400, // Preflight caching (24 hours)
-  });
+  app.useGlobalFilters(new AllExceptionsFilter());
 
-  const config = new DocumentBuilder()
-    .setTitle('StellarAid API')
-    .setDescription('API for StellarAid application')
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Enter JWT token',
-      },
-      'JWT-auth',
-    )
-    .build();
+  app.setGlobalPrefix('api');
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('/api/docs', app, document);
-
-  if (process.env.NODE_ENV !== 'production') {
-    const { createBullBoard } = await import('@bull-board/api');
-    const { BullAdapter } = await import('@bull-board/api/bullAdapter');
-    const { ExpressAdapter } = await import('@bull-board/express');
-    const Queue = (await import('bull')).default;
-
-    const serverAdapter = new ExpressAdapter();
-    serverAdapter.setBasePath('/admin/queues');
-
-    createBullBoard({
-      queues: [
-        new BullAdapter(new Queue('email')),
-        new BullAdapter(new Queue('contract-events')),
-        new BullAdapter(new Queue('analytics')),
-        new BullAdapter(new Queue('export')),
-      ],
-      serverAdapter,
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const expressApp = app.getHttpAdapter().getInstance();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    expressApp.use('/admin/queues', serverAdapter.getRouter());
-  }
-
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(port);
+  logger.info(`StellarAid API is running on port ${port} in ${nodeEnv} mode`);
 }
-void bootstrap();
+bootstrap();

@@ -1,52 +1,72 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
-import { ConfigModule } from '@nestjs/config';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { PrismaModule } from './prisma/prisma.module';
-import { QueueModule } from './queue/queue.module';
-import { RedisModule } from './redis/redis.module';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import * as Joi from 'joi';
 import { HealthModule } from './health/health.module';
-import { AuthModule } from './auth/auth.module';
-import { CampaignsModule } from './campaigns/campaigns.module';
-import { StellarModule } from './stellar/stellar.module';
-import { AdminModule } from './admin/admin.module';
-import { NotificationsModule } from './notifications/notifications.module';
-import { DonationsModule } from './donations/donations.module';
-import { AppThrottlerModule } from './throttler/throttler.module';
-import { ApiKeysModule } from './api-keys/api-keys.module';
-import { ContractsModule } from './contracts/contracts.module';
-import { UsersModule } from './users/users.module';
-import { MilestonesModule } from './milestones/milestones.module';
-import { NewsletterModule } from './newsletter/newsletter.module';
-import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env',
+      validationSchema: Joi.object({
+        PORT: Joi.number().default(3000),
+        NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+        MONGO_URI: Joi.string().required(),
+        JWT_SECRET: Joi.string().required(),
+        JWT_REFRESH_SECRET: Joi.string().required(),
+        JWT_EXPIRES_IN: Joi.string().default('15m'),
+        EMAIL_HOST: Joi.string().required(),
+        EMAIL_PORT: Joi.number().default(587),
+        EMAIL_USER: Joi.string().required(),
+        EMAIL_PASS: Joi.string().required(),
+        STELLAR_HORIZON_URL: Joi.string().uri().required(),
+        STELLAR_NETWORK: Joi.string().valid('testnet', 'mainnet').default('testnet'),
+        ALLOWED_ORIGINS: Joi.string().default(''),
+      }),
+      validationOptions: {
+        abortEarly: false,
+      },
     }),
-    ScheduleModule.forRoot(),
-    PrismaModule,
-    QueueModule,
-    RedisModule,
+
+    MongooseModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        uri: configService.get<string>('MONGO_URI'),
+        connectionFactory: (connection) => {
+          connection.on('connected', () => {
+            console.log('MongoDB connected successfully');
+          });
+          connection.on('error', (err: Error) => {
+            console.error('MongoDB connection error:', err.message);
+            process.exit(1);
+          });
+          connection.on('disconnected', () => {
+            console.warn('MongoDB disconnected');
+          });
+          return connection;
+        },
+      }),
+      inject: [ConfigService],
+    }),
+
+    ThrottlerModule.forRoot([
+      {
+        name: 'global',
+        ttl: 15 * 60 * 1000,
+        limit: 100,
+      },
+    ]),
+
     HealthModule,
-    AuthModule,
-    
-    AdminModule,
-    NotificationsModule,
-    AppThrottlerModule,
-    ApiKeysModule,
-    CampaignsModule,
-    ContractsModule,
-    DonationsModule,
-    StellarModule,
-    UsersModule,
-    MilestonesModule,
-    NewsletterModule,
-    UploadsModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
