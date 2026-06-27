@@ -1,0 +1,6 @@
+dist
+node_modules
+coverage
+*.config.js
+.eslintrc.js
+nest-cli.json
