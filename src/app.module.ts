@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import * as Joi from 'joi';
+import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -51,6 +52,8 @@ import { HealthModule } from './health/health.module';
       }),
       inject: [ConfigService],
     }),
+
+    AuthModule,
 
     ThrottlerModule.forRoot([
       {
